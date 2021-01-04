@@ -1,0 +1,100 @@
+﻿[cmdletBinding(DefaultParameterSetName = 'None')]
+param
+(
+    [String[]] [Parameter(Mandatory = $true)]$StakeHolderTeam,
+    
+
+    [String] [Parameter(Mandatory = $true)]$APIusername,
+    [String] [Parameter(Mandatory = $true)]$APIpassword
+)
+
+#This will make a call to the Role API
+    function makeRoleAPIResponse($username){
+    
+    try{ #check to see if a username has a co.multnomah.or.us domain email.
+       $roleAPILookupPath = "/roles/api/v1/User/" + $username+"@co.multnomah.or.us"
+       $roleFullPath = $identityserverURL +$roleAPILookupPath
+       $roleResp = Invoke-RestMethod -Headers $headers -Method Get -Uri $roleFullPath 
+       return $roleResp
+       }
+    catch
+        {
+        try{ #if a user does not have first domain email, test to see if username has a mcso.us domain email.
+           $roleAPILookupPath = "/roles/api/v1/User/" + $username+"@mcso.us"
+           $roleFullPath = $identityserverURL +$roleAPILookupPath
+           $roleResp = Invoke-RestMethod -Headers $headers -Method Get -Uri $roleFullPath 
+           return $roleResp
+           }
+           catch{ #if the user does not have either of the first two emails, test to see if username has a mcda domain email.
+                try{
+                   $roleAPILookupPath = "/roles/api/v1/User/" + $username+"@mcda.us"
+                   $roleFullPath = $identityserverURL +$roleAPILookupPath
+                   $roleResp = Invoke-RestMethod -Headers $headers -Method Get -Uri $roleFullPath 
+                   return $roleResp
+                   }
+                   catch{ #Throw error that usernames has no domain email for all three of these email types.
+                        write-Error("Could not find domain email for "+$username+"@co.multnomah.or.us  
+                        or "+$username+"@mcso.us 
+                        or "+$username+"@mcda.us.  Error code: "+$_)
+                        }
+                 }
+           }
+        }
+
+
+#These will be the parameters needed to make API calls.
+$identityserverURL = "https://mc-enterprise-ocelot-prd.azurewebsites.net"
+$workerAPILookupPath = "/workers/api/v1/Worker/DepartmentAndOrDivisionId?divisionId=65725"
+$granttype = "client_credentials"
+$pair = "$($APIusername):$($APIpassword)"
+$encodedCredentials = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes($pair))
+$headers = @{ Authorization = "Basic $encodedCredentials" }
+
+$StakeholderTeamMemberValid = $true;
+
+#These arrays will look at a workerAPI department ID, if they are not in DCA, they will be stakeholders.
+$StakeHolderTeamValidIDs =66303 # Department of County Assets (DCA)
+
+#These variables are for the path to each API 
+$workerAPIPath = $identityserverURL + $workerAPILookupPath
+$workerResp = Invoke-RestMethod -Headers $headers -Method Get -Uri $workerAPIPath #Get response from the worker api
+
+
+<#
+    Write-Output("---------------------------------------------------")
+    Write-Output("VALID WORKER API NAMES:")
+    #Display all valid people for project requester from worker API
+    For($i=0; $i -lt $workerResp.Length;$i++)
+    {
+        $preferredName = $workerResp.preferredFirstName[$i]+" "+$workerResp.legalLastName[$i]
+        if($StakeHolderTeamValidIDs -contains $workerResp[$q].departmentID)
+        {
+                        write-output($preferredName)
+        }
+    }
+    Write-Output("---------------------------------------------------")#>
+
+    
+    For($i=0; $i -lt $StakeHolderTeam.Length;$i++) 
+    {
+        for($q =0; $q -lt $workerResp.Length;$q++)
+        {
+                #construct two names for comparison.
+                $legalName = $workerResp.legalFirstName[$q]+" "+$workerResp.legalLastName[$q]
+                $preferredName = $workerResp.preferredFirstName[$q]+" "+$workerResp.legalLastName[$q]
+            if((($StakeHolderTeam[$i] -eq $legalName) -or ($StakeHolderTeam[$i] -eq $preferredName))-and $StakeHolderTeamValidIDs -contains $workerResp[$q].departmentID)
+            {
+                Write-Error($StakeHolderTeam[$i]+" cannot be a member of the stakeholder team, they are in DCA.")
+                $StakeholderTeamMemberValid = $false
+                break
+            }
+        }
+        if($StakeholderTeamMemberValid -eq $true)# -and ($StakeHolderTeam -contains $legalName -or $StakeHolderTeam -contains $preferredName))
+        {
+            Write-Output($StakeHolderTeam[$i]+" is a valid member of the stakeholder team.")
+        }
+        else
+        {
+                $StakeholderTeamMemberValid = $true;
+        }
+    }

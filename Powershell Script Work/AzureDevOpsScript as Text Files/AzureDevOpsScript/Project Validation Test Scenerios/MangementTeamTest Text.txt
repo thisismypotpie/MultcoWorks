@@ -1,0 +1,107 @@
+﻿[cmdletBinding(DefaultParameterSetName = 'None')]
+param
+(
+    [String[]] [Parameter(Mandatory = $true)]$ListOfManagementTeam, 
+    
+
+    [String] [Parameter(Mandatory = $true)]$APIusername,
+    [String] [Parameter(Mandatory = $true)]$APIpassword
+)
+
+#This will make a call to the Role API
+    function makeRoleAPIResponse($username){
+    
+    try{ #check to see if a username has a co.multnomah.or.us domain email.
+       $roleAPILookupPath = "/roles/api/v1/User/" + $username+"@co.multnomah.or.us"
+       $roleFullPath = $identityserverURL +$roleAPILookupPath
+       $roleResp = Invoke-RestMethod -Headers $headers -Method Get -Uri $roleFullPath 
+       return $roleResp
+       }
+    catch
+        {
+        try{ #if a user does not have first domain email, test to see if username has a mcso.us domain email.
+           $roleAPILookupPath = "/roles/api/v1/User/" + $username+"@mcso.us"
+           $roleFullPath = $identityserverURL +$roleAPILookupPath
+           $roleResp = Invoke-RestMethod -Headers $headers -Method Get -Uri $roleFullPath 
+           return $roleResp
+           }
+           catch{ #if the user does not have either of the first two emails, test to see if username has a mcda domain email.
+                try{
+                   $roleAPILookupPath = "/roles/api/v1/User/" + $username+"@mcda.us"
+                   $roleFullPath = $identityserverURL +$roleAPILookupPath
+                   $roleResp = Invoke-RestMethod -Headers $headers -Method Get -Uri $roleFullPath 
+                   return $roleResp
+                   }
+                   catch{ #Throw error that usernames has no domain email for all three of these email types.
+                        write-Error("Could not find domain email for "+$username+"@co.multnomah.or.us  
+                        or "+$username+"@mcso.us 
+                        or "+$username+"@mcda.us.  Error code: "+$_)
+                        }
+                 }
+           }
+        }
+
+#These will be the parameters needed to make API calls.
+$identityserverURL = "https://mc-enterprise-ocelot-prd.azurewebsites.net"
+$workerAPILookupPath = "/workers/api/v1/Worker/DepartmentAndOrDivisionId?divisionId=65725"
+$granttype = "client_credentials"
+$pair = "$($APIusername):$($APIpassword)"
+$encodedCredentials = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes($pair))
+$headers = @{ Authorization = "Basic $encodedCredentials" }
+
+
+$ProjectManagerListFound = $false;
+$NumberOfManagersValidated = 0;
+
+$ManagerListValidIDs = 9459, #IT Project Manager 2
+                       9458  #IT Project Manager 1
+
+<#
+    Write-Output("---------------------------------------------------")
+    Write-Output("VALID WORKER API NAMES:")
+    #Display all valid people for project requester from worker API
+    For($i=0; $i -lt $workerResp.Length;$i++)
+    {
+        $preferredName = $workerResp.preferredFirstName[$i]+" "+$workerResp.legalLastName[$i]
+        if($ManagerListValidIDs -contains $WorkerResp.jobCode[$i])
+        {
+            write-output($preferredName)
+        }
+    }
+    Write-Output("---------------------------------------------------")#>
+
+
+    For($i=0; $i -lt $workerResp.Length;$i++) #Goes through each name until it finds one of the parameter names.
+    {
+        #construct two names for comparison.
+        $legalName = $workerResp.legalFirstName[$i]+" "+$workerResp.legalLastName[$i]
+        $preferredName = $workerResp.preferredFirstName[$i]+" "+$workerResp.legalLastName[$i]
+
+        #check to see if a person is in the list of project managers.
+        for($q=0; $q -lt $ListOfManagementTeam.Length;$q++)
+        {
+            if(($ListOfManagementTeam[$q] -eq $legalName)-or ($ListOfManagementTeam[$q] -eq $preferredName))
+            {
+                $ProjectManagerListFound = $true;
+                if($ManagerListValidIDs -contains $workerResp[$i].jobCode)
+                {
+                    Write-Output($ListOfManagementTeam[$q]+" is validated to be a project manager!")
+                    $NumberOfManagersValidated = $NumberOfManagersValidated + 1;
+                    break
+                }
+                else
+                {
+                    Write-Error($ListOfManagementTeam[$q]+" DOES NOT HAVE AUTHORITY TO BE A PROJECT MANAGER!")
+                }
+            }
+        }
+    }
+
+    if($NumberOfManagersValidated -ne $ListOfManagementTeam.Length)
+    {
+        Write-Error("One or more members of the manager list were not validated!")
+    }
+        if($ProjectManagerListFound -eq $false)
+    {
+        Write-Error("NO ONE ON THE PROJECT MANAGER LIST WAS FOUND!")
+    }

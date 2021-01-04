@@ -1,0 +1,142 @@
+﻿[cmdletBinding(DefaultParameterSetName = 'None')]
+param
+(
+    [String[]] [Parameter(Mandatory = $true)]$ListOfDevelopers, 
+    
+
+    [String] [Parameter(Mandatory = $true)]$APIusername,
+    [String] [Parameter(Mandatory = $true)]$APIpassword
+)
+
+#This will make a call to the Role API
+    function makeRoleAPIResponse($username){
+    
+    try{ #check to see if a username has a co.multnomah.or.us domain email.
+       $roleAPILookupPath = "/roles/api/v1/User/" + $username+"@co.multnomah.or.us"
+       $roleFullPath = $identityserverURL +$roleAPILookupPath
+       $roleResp = Invoke-RestMethod -Headers $headers -Method Get -Uri $roleFullPath 
+       return $roleResp
+       }
+    catch
+        {
+        try{ #if a user does not have first domain email, test to see if username has a mcso.us domain email.
+           $roleAPILookupPath = "/roles/api/v1/User/" + $username+"@mcso.us"
+           $roleFullPath = $identityserverURL +$roleAPILookupPath
+           $roleResp = Invoke-RestMethod -Headers $headers -Method Get -Uri $roleFullPath 
+           return $roleResp
+           }
+           catch{ #if the user does not have either of the first two emails, test to see if username has a mcda domain email.
+                try{
+                   $roleAPILookupPath = "/roles/api/v1/User/" + $username+"@mcda.us"
+                   $roleFullPath = $identityserverURL +$roleAPILookupPath
+                   $roleResp = Invoke-RestMethod -Headers $headers -Method Get -Uri $roleFullPath 
+                   return $roleResp
+                   }
+                   catch{ #Throw error that usernames has no domain email for all three of these email types.
+                        write-Error("Could not find domain email for "+$username+"@co.multnomah.or.us  
+                        or "+$username+"@mcso.us 
+                        or "+$username+"@mcda.us.  Error code: "+$_)
+                        }
+                 }
+           }
+        }
+
+
+#These will be the parameters needed to make API calls.
+$identityserverURL = "https://mc-enterprise-ocelot-prd.azurewebsites.net"
+$workerAPILookupPath = "/workers/api/v1/Worker/DepartmentAndOrDivisionId?divisionId=65725"
+$granttype = "client_credentials"
+$pair = "$($APIusername):$($APIpassword)"
+$encodedCredentials = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes($pair))
+$headers = @{ Authorization = "Basic $encodedCredentials" }
+
+$ListOfDevelopersFound = $false;
+$NumberOfDevsValidated = 0;
+
+$DevListValidIDs = "253bde5b-c4ba-4a6a-8920-59d940956a33",#DCJAppdev
+                   "d3a6f881-7fbf-42b4-9253-76c7ea30700a",#IT-GEN_GOV-APP-DEV
+                   "d3978ebd-4031-4280-b62b-a59abf0cc76d",#EDAT_Developer
+                   "",#IT eSWIS TEAM
+                   "6630d40c-e259-4897-b7fd-e3c22ec41b6f"#IT-ENT-Integration
+
+$DevListValidIDsWorkerAPI = 6508, # 
+                            6506, # 
+                            6406  # Development Analyst Senior
+
+#These variables are for the path to each API 
+$workerAPIPath = $identityserverURL + $workerAPILookupPath
+$workerResp = Invoke-RestMethod -Headers $headers -Method Get -Uri $workerAPIPath #Get response from the worker api
+
+    <#Write-Output("---------------------------------------------------")
+    Write-Output("VALID WORKER API NAMES:")
+    #Display all valid people for project requester from worker API
+    For($i=0; $i -lt $workerResp.Length;$i++)
+    {
+        $preferredName = $workerResp.preferredFirstName[$i]+" "+$workerResp.legalLastName[$i]
+        if($DevListValidIDsWorkerAPI -contains $WorkerResp.jobCode[$i])
+        {
+            write-output($preferredName)
+        }
+    }
+    Write-Output("---------------------------------------------------")
+    Write-Output("VALID ROLE API NAMES:")
+        For($i=0; $i -lt $workerResp.Length;$i++)
+    {
+        $preferredName = $workerResp.preferredFirstName[$i]+" "+$workerResp.legalLastName[$i]
+        $roleResp = makeRoleAPIResponse $WorkerResp.username[$i]
+        For($j=0; $j -lt $roleResp.groups.Length;$j++)
+        {
+            if($DevListValidIDs -contains $roleResp.groups.id[$j])
+            {
+                write-output($preferredName)
+                break
+            }
+        }
+    }
+    Write-Output("---------------------------------------------------")#>
+
+        For($i=0; $i -lt $workerResp.Length;$i++) #Goes through each name until it finds one of the parameter names.
+    {
+        #construct two names for comparison.
+        $legalName = $workerResp.legalFirstName[$i]+" "+$workerResp.legalLastName[$i]
+        $preferredName = $workerResp.preferredFirstName[$i]+" "+$workerResp.legalLastName[$i]
+        #write-output($preferredName)
+                #Check to see if a person is in the list of devs.
+        $devAuthorized = $false;
+        for($q =0; $q -lt $ListOfDevelopers.Length;$q++)
+        {
+            if(($ListOfDevelopers[$q] -eq $legalName)-or($ListOfDevelopers[$q] -eq$preferreedName))
+            {
+                $ListOfDevelopersFound = $true
+
+                #Prepare and access roleAPI
+                $roleResp = makeRoleAPIResponse $WorkerResp.username[$i]
+                for($j=0; $j -lt $roleResp.groups.id.Length;$j++)
+                {
+                    #write-output("Name: "+$ListOfDevelopers[$q]+". Testing job code: "+$workerResp[$i].jobCode+" for dev list.") 
+                    #write-output("Name: "+$ListOfDevelopers[$q]+". Testing role group: "+$roleResp.groups.groupName[$j]+" for dev list.")
+                    if( ($DevListValidIDsWorkerAPI -contains $workerResp.jobCode[$i]) -or ($DevListValidIDs -contains $roleResp.groups.id[$j]))
+                    {
+                        Write-Output($ListOfDevelopers[$q] +" is authorized as a developer.")
+                        $NumberOfDevsValidated = $NumberOfDevsValidated + 1
+                        $devAuthorized = $true
+                        break;
+                    }
+                }
+                if($devAuthorized -eq $false)
+                {
+                   Write-Error($ListOfDevelopers[$q]+" IS NOT AUTOHRIZED TO BE A DEVELOPER!")
+                   $devAutorized = $false
+                }
+            }
+        }
+    }
+
+    if($ListOfDevelopersFound -eq $false)
+    {
+        Write-Error("LIST OF DEVELOPERS NOT FOUND!")
+    }
+    if($NumberOfDevsValidated -ne $ListOfDevelopers.Length)
+    {
+        Write-Error("AT least one develop from the list is not validated!")
+    }

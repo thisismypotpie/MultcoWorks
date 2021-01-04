@@ -1,0 +1,24 @@
+﻿[cmdletBinding(DefaultParameterSetName = 'None')]
+param
+(
+    [String] [Parameter(Mandatory = $true)]$ProjectName
+)
+
+#Get list of all projects 
+$projlist = az devops project list --org "https://dev.azure.com/mc-sdis" -o json | ConvertFrom-Json
+
+Write-Output("---------------------------------------------------------")
+Write-output("CURRENTLY LISTED PROJECTS:")
+Write-output($projlist.value.name)
+Write-Output("---------------------------------------------------------")
+
+#Test to see if input name already exists.
+if($projlist.value.name -contains $ProjectName)
+{
+    Write-Error("ERROR: PROJECT NAME "+$ProjectName+"IS TAKEN. PLEASE CHOOSE ANOTHER NAME!")
+    return
+}
+else
+{
+    Write-Output("Project name is good to go!")
+}

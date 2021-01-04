@@ -1,0 +1,140 @@
+﻿[cmdletBinding(DefaultParameterSetName = 'None')]
+param
+(
+    [String] [Parameter(Mandatory = $true)]$ProjectRequester,
+    
+
+    [String] [Parameter(Mandatory = $true)]$APIusername,
+    [String] [Parameter(Mandatory = $true)]$APIpassword
+)
+
+#This will make a call to the Role API
+    function makeRoleAPIResponse($username){
+    
+    try{ #check to see if a username has a co.multnomah.or.us domain email.
+       $roleAPILookupPath = "/roles/api/v1/User/" + $username+"@co.multnomah.or.us"
+       $roleFullPath = $identityserverURL +$roleAPILookupPath
+       $roleResp = Invoke-RestMethod -Headers $headers -Method Get -Uri $roleFullPath 
+       return $roleResp
+       }
+    catch
+        {
+        try{ #if a user does not have first domain email, test to see if username has a mcso.us domain email.
+           $roleAPILookupPath = "/roles/api/v1/User/" + $username+"@mcso.us"
+           $roleFullPath = $identityserverURL +$roleAPILookupPath
+           $roleResp = Invoke-RestMethod -Headers $headers -Method Get -Uri $roleFullPath 
+           return $roleResp
+           }
+           catch{ #if the user does not have either of the first two emails, test to see if username has a mcda domain email.
+                try{
+                   $roleAPILookupPath = "/roles/api/v1/User/" + $username+"@mcda.us"
+                   $roleFullPath = $identityserverURL +$roleAPILookupPath
+                   $roleResp = Invoke-RestMethod -Headers $headers -Method Get -Uri $roleFullPath 
+                   return $roleResp
+                   }
+                   catch{ #Throw error that usernames has no domain email for all three of these email types.
+                        write-Error("Could not find domain email for "+$username+"@co.multnomah.or.us  
+                        or "+$username+"@mcso.us 
+                        or "+$username+"@mcda.us.  Error code: "+$_)
+                        }
+                 }
+           }
+        }
+
+#These will be the parameters needed to make API calls.
+$identityserverURL = "https://mc-enterprise-ocelot-prd.azurewebsites.net"
+$workerAPILookupPath = "/workers/api/v1/Worker/DepartmentAndOrDivisionId?divisionId=65725"
+$granttype = "client_credentials"
+$pair = "$($APIusername):$($APIpassword)"
+$encodedCredentials = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes($pair))
+$headers = @{ Authorization = "Basic $encodedCredentials" }
+
+#These variables are used to confirm each parameter has been validated.
+$ProjectRequesterFound = $false;
+$ProjectRequesterValidated = $false;
+
+$ProjectRequesterValidIDs ="a97d5aa5-d383-4733-8ca0-8092087209fc", #DCJ-BSA
+                           "fa3b6f05-4588-4932-829a-679e62529375",#IT-BSA
+                           "dabf627a-fbf1-4a0f-8597-b9fbfe023917",#EDAT-BSA
+                           "1c3029cc-fe0e-4d86-8c67-c5e1eaf48739"#IT-BSA-ICS-PharmAndDental
+
+$ProjectRequesterValidIDsWorkerAPI = 6064, #Business System Analyst
+                                     6055  #Business System Analyst Senior
+
+#These variables are for the path to each API 
+$workerAPIPath = $identityserverURL + $workerAPILookupPath
+$workerResp = Invoke-RestMethod -Headers $headers -Method Get -Uri $workerAPIPath #Get response from the worker api
+
+    <#Write-Output("---------------------------------------------------")
+    Write-Output("VALID WORKER API NAMES:")
+    #Display all valid people for project requester from worker API
+    For($i=0; $i -lt $workerResp.Length;$i++)
+    {
+        $preferredName = $workerResp.preferredFirstName[$i]+" "+$workerResp.legalLastName[$i]
+        if($ProjectRequesterValidIDsWorkerAPI -contains $WorkerResp.jobCode[$i])
+        {
+            write-output($preferredName)
+        }
+    }
+    Write-Output("---------------------------------------------------")
+    Write-Output("VALID ROLE API NAMES:")
+        For($i=0; $i -lt $workerResp.Length;$i++)
+    {
+        $preferredName = $workerResp.preferredFirstName[$i]+" "+$workerResp.legalLastName[$i]
+        $roleResp = makeRoleAPIResponse $WorkerResp.username[$i]
+        For($j=0; $j -lt $roleResp.groups.Length;$j++)
+        {
+            if($ProjectRequesterValidIDs -contains $roleResp.groups.id[$j])
+            {
+                write-output($preferredName)
+            }
+        }
+    }
+    Write-Output("---------------------------------------------------")#>
+    For($i=0; $i -lt $workerResp.Length;$i++) #Goes through each name until it finds one of the parameter names.
+    {
+        #construct two names for comparison.
+        $legalName = $workerResp.legalFirstName[$i]+" "+$workerResp.legalLastName[$i]
+        $preferredName = $workerResp.preferredFirstName[$i]+" "+$workerResp.legalLastName[$i]
+        #Check to see if a person is in the list of QA Analysts
+    
+                #project requester Handling
+        if(($ProjectRequester -eq $legalName)-or($ProjectRequester -eq $preferredName))
+        {
+            #Confirm that Project Requester has been found.
+            $ProjectRequesterFound = $true;
+
+            if($ProjectRequesterValidIDsWorkerAPI -contains $WorkerResp.jobCode[$i])
+            {
+               Write-Output($ProjectRequester + " has job code "+$WorkerResp.jobCode[$i]+". PROJECT REQUESTER APPROVED!")
+               $ProjectRequesterValidated = $true;
+               break
+            }
+            #Prepare and access roleAPI
+            $roleResp = makeRoleAPIResponse $WorkerResp.username[$i]
+            #Go through each group name for the found person and confirm they are in any of the following groups.
+            For($j=0; $j -lt $roleResp.groups.Length;$j++)
+            {
+                #Write-Output("Name: "+$ProjectRequester+". Testing group "+$roleResp.groups.groupName[$j]+" for project requester.")
+                if($ProjectRequesterValidIDs -contains $roleResp.groups.id[$j])
+                {
+                    Write-Output($ProjectRequester + " is in group "+$roleResp.groups.id[$j]+". PROJECT REQUESTER APPROVED!")
+                    $ProjectRequesterValidated = $true;
+                    break
+                }
+            }
+
+            #Confirm that the project requester has been authorized.
+            if($ProjectRequesterValidated -eq $false)
+            {
+                Write-Error($ProjectRequester+" IS NOT AUTHORIZED TO REQUEST A PROJECT.")
+            }
+        }
+    
+    }
+
+    #Testing to make sure each of the parameters have been found.
+    if($ProjectRequesterFound -eq $false)
+    {
+        Write-Error("PROJECT REQUESTER NAME NOT FOUND!")
+    }

@@ -1,0 +1,78 @@
+﻿[cmdletBinding(DefaultParameterSetName = 'None')]
+param
+( 
+
+    [String] [Parameter(Mandatory = $true)]$APIusername,
+    [String] [Parameter(Mandatory = $true)]$APIpassword,
+    [String[]] [Parameter(Mandatory = $true)]$GroupNamesYouWantIDsFor,
+    [String[]][Parameter(Mandatory =$true)]$PeopleYouAreLookingFor
+)
+
+
+    function makeRoleAPIResponse($username){
+    
+    try{
+            $roleAPILookupPath = "/roles/api/v1/User/" + $username+"@co.multnomah.or.us"
+            $roleFullPath = $identityserverURL +$roleAPILookupPath
+            $roleResp = Invoke-RestMethod -Headers $headers -Method Get -Uri $roleFullPath 
+            return $roleResp
+       }
+    catch
+        {
+            try{
+                    $roleAPILookupPath = "/roles/api/v1/User/" + $username+"@mcso.us"
+                    $roleFullPath = $identityserverURL +$roleAPILookupPath
+                    $roleResp = Invoke-RestMethod -Headers $headers -Method Get -Uri $roleFullPath 
+                    return $roleResp
+               }
+            catch{
+                        try{
+                                $roleAPILookupPath = "/roles/api/v1/User/" + $username+"@mcda.us"
+                                $roleFullPath = $identityserverURL +$roleAPILookupPath
+                                $roleResp = Invoke-RestMethod -Headers $headers -Method Get -Uri $roleFullPath 
+                                return $roleResp
+                        }
+                        catch{
+                           write-Error("Could not find domain email for "+$username+"@co.multnomah.or.us  
+                                        or "+$username+"@mcso.us 
+                                        or "+$username+"@mcda.us.  Error code: "+$_)
+                        }
+                 }
+        }
+    }
+
+
+#These will be the parameters needed to make API calls.
+$identityserverURL = "https://mc-enterprise-ocelot-prd.azurewebsites.net"
+$workerAPILookupPath = "/workers/api/v1/Worker/DepartmentAndOrDivisionId?divisionId=65725"
+$granttype = "client_credentials"
+$pair = "$($APIusername):$($APIpassword)"
+$encodedCredentials = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes($pair))
+$headers = @{ Authorization = "Basic $encodedCredentials" }
+
+$IDsWeAreLookingFor = "#IT eSWIS TEAM","EDAT-BSA" #Group name you want to find.
+
+#These variables are for the path to each API 
+$workerAPIPath = $identityserverURL + $workerAPILookupPath
+$workerResp = Invoke-RestMethod -Headers $headers -Method Get -Uri $workerAPIPath #Get response from the worker api
+
+For($i=0; $i -lt $workerResp.Length;$i++) #Goes through each name until it finds one of the parameter names.
+{
+        $preferredName = $workerResp.preferredFirstName[$i]+" "+$workerResp.legalLastName[$i]
+            #Write-Output("Testing: "+$preferredName)
+            $roleResp = makeRoleAPIResponse $WorkerResp.username[$i]
+            
+            For($j=0; $j -lt $roleResp.groups.Length;$j++)
+            {
+                if($GroupNamesYouWantIDsFor -contains $roleResp.groups.id[$j])
+                {
+                     Write-Output($roleResp.groups[$j])
+                    return;
+                }
+                if( $PeopleYouAreLookingFor -contains $preferredName)
+                {
+                    Write-Output($roleResp.groups)
+                    return;
+                }
+            }
+}

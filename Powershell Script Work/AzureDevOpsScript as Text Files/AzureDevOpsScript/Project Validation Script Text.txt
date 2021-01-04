@@ -1,0 +1,333 @@
+﻿[cmdletBinding(DefaultParameterSetName = 'None')]
+param
+(
+    [String] [Parameter(Mandatory = $true)]$ProjectName,
+    [String] [Parameter(Mandatory = $true)]$ProjectRequester, 
+    [String] [Parameter(Mandatory = $true)]$ProjectAdmin,
+    [String[]] [Parameter(Mandatory = $true)]$ListOfQAAnalysts,
+    [String[]] [Parameter(Mandatory = $true)]$ListOfDevelopers,
+    [String[]] [Parameter(Mandatory = $true)]$StakeHolderTeam,
+    [String[]] [Parameter(Mandatory = $true)]$ListOfManagementTeam, 
+    
+
+    [String] [Parameter(Mandatory = $true)]$APIusername,
+    [String] [Parameter(Mandatory = $true)]$APIpassword
+)
+
+#This will make a call to the Role API
+    function makeRoleAPIResponse($username){
+    
+    try{ #check to see if a username has a co.multnomah.or.us domain email.
+       $roleAPILookupPath = "/roles/api/v1/User/" + $username+"@co.multnomah.or.us"
+       $roleFullPath = $identityserverURL +$roleAPILookupPath
+       $roleResp = Invoke-RestMethod -Headers $headers -Method Get -Uri $roleFullPath 
+       return $roleResp
+       }
+    catch
+        {
+        try{ #if a user does not have first domain email, test to see if username has a mcso.us domain email.
+           $roleAPILookupPath = "/roles/api/v1/User/" + $username+"@mcso.us"
+           $roleFullPath = $identityserverURL +$roleAPILookupPath
+           $roleResp = Invoke-RestMethod -Headers $headers -Method Get -Uri $roleFullPath 
+           return $roleResp
+           }
+           catch{ #if the user does not have either of the first two emails, test to see if username has a mcda domain email.
+                try{
+                   $roleAPILookupPath = "/roles/api/v1/User/" + $username+"@mcda.us"
+                   $roleFullPath = $identityserverURL +$roleAPILookupPath
+                   $roleResp = Invoke-RestMethod -Headers $headers -Method Get -Uri $roleFullPath 
+                   return $roleResp
+                   }
+                   catch{ #Throw error that usernames has no domain email for all three of these email types.
+                        write-Error("Could not find domain email for "+$username+"@co.multnomah.or.us  
+                        or "+$username+"@mcso.us 
+                        or "+$username+"@mcda.us.  Error code: "+$_)
+                        }
+                 }
+           }
+        }
+
+
+
+#These will be the parameters needed to make API calls.
+$identityserverURL = "https://mc-enterprise-ocelot-prd.azurewebsites.net"
+$workerAPILookupPath = "/workers/api/v1/Worker/DepartmentAndOrDivisionId?divisionId=65725"
+$granttype = "client_credentials"
+$pair = "$($APIusername):$($APIpassword)"
+$encodedCredentials = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes($pair))
+$headers = @{ Authorization = "Basic $encodedCredentials" }
+   
+#These variables are used to confirm each parameter has been validated.
+$ProjectRequesterFound = $false;
+$ProjectRequesterValidated = $false;
+
+$ProjectAdminFound = $false;
+$ProjectAdminValidated = $false;
+
+$ListOfQAAnalystsFound = $false;
+$NumberofAQAnalystsValidated = 0;
+
+$ListOfDevelopersFound = $false;
+$NumberOfDevsValidated = 0;
+
+$ProjectManagerListFound = $false;
+$NumberOfManagersValidated = 0
+
+$StakeholderTeamFound = $false;
+$StakeholderTeamMemberValid = $true;
+
+#These arrays will be the correct ID's from the RoleAPI for each parameter to compare to.
+$ProjectAdminValidIDs = "b7ec8c7b-846c-4396-a15e-6cf86b45e748" # IT-Leadership Team
+
+$ProjectRequesterValidIDs ="a97d5aa5-d383-4733-8ca0-8092087209fc", #DCJ-BSA
+                           "fa3b6f05-4588-4932-829a-679e62529375",#IT-BSA
+                           "dabf627a-fbf1-4a0f-8597-b9fbfe023917",#EDAT-BSA
+                           "1c3029cc-fe0e-4d86-8c67-c5e1eaf48739"#IT-BSA-ICS-PharmAndDental
+
+$DevListValidIDs = "253bde5b-c4ba-4a6a-8920-59d940956a33",#DCJAppdev
+                   "d3a6f881-7fbf-42b4-9253-76c7ea30700a",#IT-GEN_GOV-APP-DEV
+                   "d3978ebd-4031-4280-b62b-a59abf0cc76d",#EDAT_Developer
+                   "",#IT eSWIS TEAM
+                   "6630d40c-e259-4897-b7fd-e3c22ec41b6f"#IT-ENT-Integration
+
+#These arrays will be the correct ID's from the workerAPI jobcode field.
+$QAAnalystValidIDs = 6405, #Development Analyst
+                     6406  #Development Analyst Senior
+$DevListValidIDsWorkerAPI = 6508, # 
+                            6506, # 
+                            6406  # Development Analyst Senior
+$ManagerListValidIDs = 9459, #IT Project Manager 2
+                       9458  #IT Project Manager 1
+$ProjectRequesterValidIDsWorkerAPI = 6064, #Business System Analyst
+                                     6055  #Business System Analyst Senior
+
+#These arrays will look at a workerAPI department ID, if they are not in DCA, they will be stakeholders.
+$StakeHolderTeamValidIDs =66303 # Department of County Assets (DCA)
+
+
+#These variables are for the path to each API 
+$workerAPIPath = $identityserverURL + $workerAPILookupPath
+$workerResp = Invoke-RestMethod -Headers $headers -Method Get -Uri $workerAPIPath #Get response from the worker api
+
+#Check project name
+$projlist = az devops project list --org "https://dev.azure.com/mc-sdis" -o json | ConvertFrom-Json
+if($projlist.value.name -contains $ProjectName)
+{
+    Write-Error("ERROR: PROJECT NAME "+$ProjectName+"IS TAKEN. PLEASE CHOOSE ANOTHER NAME!")
+    return
+}
+else
+{
+    Write-Output("Project name is good to go!")
+}
+
+#Check to see if each member of the stakeholder team is not in DCA.
+    For($i=0; $i -lt $StakeHolderTeam.Length;$i++) 
+    {
+        for($q =0; $q -lt $workerResp.Length;$q++)
+        {
+                #construct two names for comparison.
+                $legalName = $workerResp.legalFirstName[$q]+" "+$workerResp.legalLastName[$q]
+                $preferredName = $workerResp.preferredFirstName[$q]+" "+$workerResp.legalLastName[$q]
+            if((($StakeHolderTeam[$i] -eq $legalName) -or ($StakeHolderTeam[$i] -eq $preferredName))-and $StakeHolderTeamValidIDs -contains $workerResp[$q].departmentID)
+            {
+                $StakeholderTeamFound = $true;
+                Write-Error($StakeHolderTeam[$i]+" cannot be a member of the stakeholder team, they are in DCA.")
+                $StakeholderTeamMemberValid = $false
+                break
+            }
+        }
+        if($StakeholderTeamMemberValid -eq $true)# -and ($StakeHolderTeam -contains $legalName -or $StakeHolderTeam -contains $preferredName))
+        {
+        
+            $StakeholderTeamFound = $true;
+            Write-Output($StakeHolderTeam[$i]+" is a valid member of the stakeholder team.")
+        }
+        else
+        {
+                $StakeholderTeamMemberValid = $true;
+        }
+    }
+
+
+    For($i=0; $i -lt $workerResp.Length;$i++) #Goes through each name until it finds one of the parameter names.
+    {
+        #construct two names for comparison.
+        $legalName = $workerResp.legalFirstName[$i]+" "+$workerResp.legalLastName[$i]
+        $preferredName = $workerResp.preferredFirstName[$i]+" "+$workerResp.legalLastName[$i]
+        
+        #Check to see if a person is in the list of QA Analysts
+       
+        #This is checked through a job code from worker API rather than a group in role API since there is not QA group in role API.
+        for($q =0; $q -lt $ListOfQAAnalysts.Length;$q++)
+        {
+            #write-output("Comparing "+$ListOfQAAnalysts[$q]+" and "+$legalName+" and "+$preferredName+"for QA Analyst.")
+            if(($ListOfQAAnalysts[$q] -eq $legalName)-or ($ListOfQAAnalysts[$q] -eq $preferredName))
+            {
+                $ListOfQAAnalystsFound = $true
+                #write-output("Name: "+$ListOfQAAnalysts[$q]+". Testing job code: "+$workerResp[$i].jobCode+" for QA Analyst.") 
+                if($workerResp.divisionID[$i] -eq 65725 -and ($QAAnalystValidIDs -contains $workerResp[$i].jobCode))
+                {
+                    write-output($ListOfQAAnalysts[$q]+" is validated as a qa analyst!")
+                    $NumberofAQAnalystsValidated = $NumberofAQAnalystsValidated + 1
+                    break
+                }
+                else
+                {
+                    Write-Error($ListOfQAAnalysts[$q]+" DOES NOT HAVE AUTHORITY TO BE A QA ANALYST!")
+                }
+            }
+        }
+
+        #check to see if a person is in the list of project managers.
+        for($q=0; $q -lt $ListOfManagementTeam.Length;$q++)
+        {
+            if(($ListOfManagementTeam[$q] -eq $legalName)-or ($ListOfManagementTeam[$q] -eq $preferredName))
+            {
+                $ProjectManagerListFound = $true;
+                if($ManagerListValidIDs -contains $workerResp[$i].jobCode)
+                {
+                    Write-Output($ListOfManagementTeam[$q]+" is validated to be a project manager!")
+                    $NumberOfManagersValidated= $NumberOfManagersValidated + 1
+                    break
+                }
+                else
+                {
+                    Write-Error($ListOfManagementTeam[$q]+" DOES NOT HAVE AUTHORITY TO BE A PROJECT MANAGER!")
+                }
+            }
+        }
+        
+        #Check to see if a person is in the list of devs.
+        $devAuthorized = $false;
+        for($q =0; $q -lt $ListOfDevelopers.Length;$q++)
+        {
+            if(($ListOfDevelopers[$q] -eq $legalName)-or($ListOfDevelopers[$q] -eq$preferreedName))
+            {
+                $ListOfDevelopersFound = $true
+
+                #Prepare and access roleAPI
+                $roleResp = makeRoleAPIResponse $WorkerResp.username[$i]
+                for($j=0; $j -lt $roleResp.groups.id.Length;$j++)
+                {
+                    #write-output("Name: "+$ListOfDevelopers[$q]+". Testing job code: "+$workerResp[$i].jobCode+" for dev list.") 
+                    #write-output("Name: "+$ListOfDevelopers[$q]+". Testing role group: "+$roleResp.groups.groupName[$j]+" for dev list.")
+                    if( ($DevListValidIDsWorkerAPI -contains $workerResp.jobCode[$i]) -or ($DevListValidIDs -contains $roleResp.groups.id[$j]))
+                    {
+                        Write-Output($ListOfDevelopers[$q] +" is authorized as a developer!")
+                        $NumberOfDevsValidated = $NumberOfDevsValidated + 1
+                        $devAuthorized = $true
+                        break;
+                    }
+                }
+                if($devAuthorized -eq $false)
+                {
+                   Write-Error($ListOfDevelopers[$q]+" IS NOT AUTOHRIZED TO BE A DEVELOPER!")
+                   $devAutorized = $false
+                }
+            }
+        }
+
+                #project requester Handling
+        if(($ProjectRequester -eq $legalName)-or($ProjectRequester -eq $preferredName))
+        {
+            #Confirm that Project Requester has been found.
+            $ProjectRequesterFound = $true;
+            #Check worker API so see if name is approved.
+            if($ProjectRequesterValidIDsWorkerAPI -contains $WorkerResp.jobCode[$i])
+            {
+               Write-Output($ProjectRequester + " has job code "+$WorkerResp.jobCode[$i]+". PROJECT REQUESTER APPROVED!")
+               $ProjectRequesterValidated = $true;
+            }
+            if($ProjectRequesterValidated -eq $false)# Makes sure not to check other API if already validated.
+            {
+                        #Prepare and access roleAPI
+            $roleResp = makeRoleAPIResponse $WorkerResp.username[$i]
+            #Go through each group name for the found person and confirm they are in any of the following groups.
+            For($j=0; $j -lt $roleResp.groups.Length;$j++)
+            {
+                #Write-Output("Name: "+$ProjectRequester+". Testing group "+$roleResp.groups.groupName[$j]+" for project requester.")
+                if($ProjectRequesterValidIDs -contains $roleResp.groups.id[$j])
+                {
+                    Write-Output($ProjectRequester + " is authorized to be a project requester!")
+                    $ProjectRequesterValidated = $true;
+                    break
+                }
+            }
+            }
+
+            #Confirm that the project requester has been authorized.
+            if($ProjectRequesterValidated -eq $false)
+            {
+                Write-Error($ProjectRequester+" IS NOT AUTHORIZED TO REQUEST A PROJECT.")
+            }
+        }
+        
+        # Project Admin Handling.
+        if(($ProjectAdmin -eq $legalName)-or($ProjectAdmin -eq $preferredName))
+        {
+            #Confirm project admin has been found.
+            $ProjectAdminFound = $true
+
+            #Set up and get response from role API
+            $roleResp = makeRoleAPIResponse($WorkerResp.username[$i])
+                        
+            For($j=0; $j -lt $roleResp.groups.groupName.Length;$j++)
+            {
+                #Write-Output("Name: "+$ProjectAdmin+". Testing group "+$roleResp.groups.id[$j]+" for project admin.")
+                if($ProjectAdminValidIDs -contains $roleResp.groups.id[$j])
+                {
+                    Write-Output($ProjectAdmin + " is authorized to be a project admin!")
+                    $ProjectAdminValidated = $true;
+                    break
+                }
+            }
+            if($ProjectAdminValidated -eq $false)
+            {
+                Write-Error($ProjectAdmin+" IS NOT AUTHORIZED TO BE A PROJECT ADMIN.")
+            }
+        }
+    }
+
+    #Testing to make sure each of the parameters have been found.
+    if($ProjectRequesterFound -eq $false)
+    {
+        Write-Error("PROJECT REQUESTER NAME NOT FOUND!")
+    }
+
+    if($ProjectAdminFound -eq $false)
+    {
+        Write-Error("PROJECT ADMIN NAME NOT FOUND!")
+    }
+    
+    if($ListOfQAAnalystsFound -eq $false)
+    {
+        Write-Error("NO ONE ON THE LIST OF QA ANALYSTS WERE FOUND!")
+    }
+    elseif($NumberofAQAnalystsValidated -ne $ListOfQAAnalysts.Length)
+    {
+        Write-Error("At least one member of the QA Analyst list is not validated!")
+    }
+    
+    if($ListOfDevelopersFound -eq $false)
+    {
+        Write-Error("NO ONE ON THE LIST OF DEVELOPERS WERE FOUND!")
+    }
+    elseif($NumberOfDevsValidated -ne $NumberOfDevsValidated)
+    {
+        Write-Error("At least one member of the developer list is not validated.")
+    }
+    
+    if($ProjectManagerListFound -eq $false)
+    {
+        Write-Error("NO ONE ON THE PROJECT MANAGER LIST WAS FOUND!")
+    }
+    elseif($NumberOfManagersValidated -ne $ListOfManagementTeam.Length)
+    {
+        Write-Error("One or more members of the manager list were not validated!")
+    }
+
+    if($StakeholderTeamFound -eq $false)
+    {
+        Write-Error("NO MEMBERS OF THE STAKEHOLDER TEAM WERE FOUND!")
+    }

@@ -1,0 +1,109 @@
+﻿[cmdletBinding(DefaultParameterSetName = 'None')]
+param
+( 
+    [String] [Parameter(Mandatory = $true)]$ProjectAdmin,
+    
+
+    [String] [Parameter(Mandatory = $true)]$APIusername,
+    [String] [Parameter(Mandatory = $true)]$APIpassword
+)
+
+#This will make a call to the Role API
+    function makeRoleAPIResponse($username){
+    
+    try{ #check to see if a username has a co.multnomah.or.us domain email.
+       $roleAPILookupPath = "/roles/api/v1/User/" + $username+"@co.multnomah.or.us"
+       $roleFullPath = $identityserverURL +$roleAPILookupPath
+       $roleResp = Invoke-RestMethod -Headers $headers -Method Get -Uri $roleFullPath 
+       return $roleResp
+       }
+    catch
+        {
+        try{ #if a user does not have first domain email, test to see if username has a mcso.us domain email.
+           $roleAPILookupPath = "/roles/api/v1/User/" + $username+"@mcso.us"
+           $roleFullPath = $identityserverURL +$roleAPILookupPath
+           $roleResp = Invoke-RestMethod -Headers $headers -Method Get -Uri $roleFullPath 
+           return $roleResp
+           }
+           catch{ #if the user does not have either of the first two emails, test to see if username has a mcda domain email.
+                try{
+                   $roleAPILookupPath = "/roles/api/v1/User/" + $username+"@mcda.us"
+                   $roleFullPath = $identityserverURL +$roleAPILookupPath
+                   $roleResp = Invoke-RestMethod -Headers $headers -Method Get -Uri $roleFullPath 
+                   return $roleResp
+                   }
+                   catch{ #Throw error that usernames has no domain email for all three of these email types.
+                        write-Error("Could not find domain email for "+$username+"@co.multnomah.or.us  
+                        or "+$username+"@mcso.us 
+                        or "+$username+"@mcda.us.  Error code: "+$_)
+                        }
+                 }
+           }
+        }
+
+#These will be the parameters needed to make API calls.
+$identityserverURL = "https://mc-enterprise-ocelot-prd.azurewebsites.net"
+$workerAPILookupPath = "/workers/api/v1/Worker/DepartmentAndOrDivisionId?divisionId=65725"
+$granttype = "client_credentials"
+$pair = "$($APIusername):$($APIpassword)"
+$encodedCredentials = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes($pair))
+$headers = @{ Authorization = "Basic $encodedCredentials" }
+
+$ProjectAdminFound = $false;
+$ProjectAdminValidated = $false;
+
+$ProjectAdminValidIDs = "b7ec8c7b-846c-4396-a15e-6cf86b45e748" # IT-Leadership Team
+    
+    <#
+    Write-Output("---------------------------------------------------")
+    Write-Output("VALID ROLE API NAMES:")
+        For($i=0; $i -lt $workerResp.Length;$i++)
+    {
+        $preferredName = $workerResp.preferredFirstName[$i]+" "+$workerResp.legalLastName[$i]
+        $roleResp = makeRoleAPIResponse $WorkerResp.username[$i]
+        For($j=0; $j -lt $roleResp.groups.Length;$j++)
+        {
+            if($ProjectAdminValidIDs -contains $roleResp.groups.id[$j])
+            {
+                write-output($preferredName)
+            }
+        }
+    }
+    Write-Output("---------------------------------------------------")#>
+
+    
+    For($i=0; $i -lt $workerResp.Length;$i++) #Goes through each name until it finds one of the parameter names.
+    {
+        #construct two names for comparison.
+        $legalName = $workerResp.legalFirstName[$i]+" "+$workerResp.legalLastName[$i]
+        $preferredName = $workerResp.preferredFirstName[$i]+" "+$workerResp.legalLastName[$i]
+
+                # Project Admin Handling.
+        if(($ProjectAdmin -eq $legalName)-or($ProjectAdmin -eq $preferredName))
+        {
+            #Confirm project admin has been found.
+            $ProjectAdminFound = $true
+
+            #Set up and get response from role API
+            $roleResp = makeRoleAPIResponse($WorkerResp.username[$i])
+                        
+            For($j=0; $j -lt $roleResp.groups.groupName.Length;$j++)
+            {
+                if($ProjectAdminValidIDs -contains $roleResp.groups.id[$j])
+                {
+                    Write-Output($ProjectAdmin + " is in group "+$roleResp.groups.id[$j]+". PROJECT ADMIN APPROVED!")
+                    $ProjectAdminValidated = $true;
+                    break
+                }
+            }
+            if($ProjectAdminValidated -eq $false)
+            {
+                Write-Error($ProjectAdmin+" IS NOT AUTHORIZED TO BE A PROJECT ADMIN.")
+            }
+        }
+    }
+
+    if($ProjectAdminFound -eq $false)
+    {
+        Write-Error("PROJECT ADMIN NAME NOT FOUND!")
+    }
